@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: #0f1419;
+  scroll-behavior: smooth;
+}
+
+.cyber-grid {
+  background-image: linear-gradient(rgba(56, 189, 248, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+}
+
+.glow-border:hover {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.6);
+}
+
+/* Prevent layout shift during animations */
+.prevent-layout-shift {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Smooth scrolling for containers */
+.smooth-scroll {
+  scroll-behavior: smooth;
+}
+
+/* Prevent page jump during animations */
+.motion-prevent-jump {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
