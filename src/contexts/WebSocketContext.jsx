@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { useContractDeployments } from '../hooks/useContractDeployments';
 
 const WebSocketContext = createContext();
 
@@ -24,9 +23,6 @@ export const WebSocketProvider = ({ children }) => {
   // Running totals
   const [totalRawResponsesReceived, setTotalRawResponsesReceived] = useState(0);
   const [totalToParameterEntriesReceived, setTotalToParameterEntriesReceived] = useState(0);
-
-  // Supabase integration
-  const { saveContractDeployment, clearAllContractDeployments, generateEtherscanUrl } = useContractDeployments();
 
   const wsRef = useRef(null);
   const subscriptionIds = useRef({});
@@ -82,7 +78,90 @@ export const WebSocketProvider = ({ children }) => {
     setRawResponses(prev => [responseEntry, ...prev.slice(0, 199)]);
   };
 
-  // Add 'to' parameter entry with enhanced contract detection and Supabase saving
+  // Enhanced function to save contract deployment with immediate verification trigger
+  const saveContractDeploymentWithVerification = async (deploymentData) => {
+    try {
+      // Import supabase and verification hook dynamically to avoid circular dependencies
+      const { default: supabase } = await import('../lib/supabase');
+      
+      const etherscanUrl = `https://etherscan.io/tx/${deploymentData.transaction_hash}`;
+      
+      const dataToSave = {
+        transaction_hash: deploymentData.transaction_hash,
+        from_address: deploymentData.from_address,
+        to_address: deploymentData.to_address || null,
+        input_data: deploymentData.input_data,
+        input_size: deploymentData.input_size,
+        gas_price: deploymentData.gas_price,
+        gas_limit: deploymentData.gas_limit,
+        value: deploymentData.value,
+        nonce: deploymentData.nonce,
+        block_number: deploymentData.block_number,
+        detected_at: deploymentData.detected_at || new Date().toISOString(),
+        status: deploymentData.status || 'pending',
+        contract_address: deploymentData.contract_address,
+        verification_status: 'pending', // Set to pending for immediate verification
+        etherscan_url: etherscanUrl
+      };
+
+      console.log('💾 Saving contract deployment with auto-verification:', {
+        txHash: dataToSave.transaction_hash?.slice(0, 10) + '...',
+        fromAddress: dataToSave.from_address?.slice(0, 10) + '...',
+        etherscanUrl: etherscanUrl,
+        detected_at: dataToSave.detected_at,
+        verification_status: dataToSave.verification_status
+      });
+
+      const { data, error } = await supabase
+        .from('contract_deployments_monitor_7x9k2a')
+        .upsert(dataToSave, {
+          onConflict: 'transaction_hash',
+          ignoreDuplicates: false
+        })
+        .select();
+
+      if (error) {
+        console.error('❌ Error saving contract deployment:', error);
+        throw error;
+      }
+
+      console.log('✅ Contract deployment saved successfully:', data);
+      
+      // 🔥 TRIGGER IMMEDIATE VERIFICATION
+      // Add a small delay to ensure the record is committed, then trigger verification
+      setTimeout(async () => {
+        try {
+          console.log('🚀 Triggering immediate verification for:', dataToSave.transaction_hash?.slice(0, 10) + '...');
+          
+          // Trigger verification by publishing a verification event via Supabase realtime
+          const verificationTrigger = {
+            action: 'trigger_verification',
+            transaction_hash: dataToSave.transaction_hash,
+            timestamp: new Date().toISOString()
+          };
+
+          // Use a separate channel to trigger verification
+          const verificationChannel = supabase.channel('verification_trigger');
+          verificationChannel.send({
+            type: 'broadcast',
+            event: 'new_deployment_for_verification',
+            payload: verificationTrigger
+          });
+
+          console.log('📡 Verification trigger sent:', verificationTrigger);
+        } catch (verificationError) {
+          console.error('❌ Error triggering verification:', verificationError);
+        }
+      }, 500); // 500ms delay to ensure database commit
+
+      return data;
+    } catch (err) {
+      console.error('❌ Error in saveContractDeploymentWithVerification:', err);
+      throw err;
+    }
+  };
+
+  // Add 'to' parameter entry with enhanced contract detection and immediate verification
   const addToParameterEntry = async (txHash, txData) => {
     if (isDisconnecting.current || !enabledStateRef.current) {
       return;
@@ -115,7 +194,7 @@ export const WebSocketProvider = ({ children }) => {
       gasPrice: txData.gasPrice,
       value: txData.value,
       nonce: txData.nonce,
-      etherscanUrl: generateEtherscanUrl(txHash) // Add Etherscan URL
+      etherscanUrl: `https://etherscan.io/tx/${txHash}` // Add Etherscan URL
     };
 
     console.log('Adding to parameter entry:', {
@@ -134,7 +213,7 @@ export const WebSocketProvider = ({ children }) => {
     // Add to array (newest first) and keep last 200 items
     setToParameterFeed(prev => {
       const newFeed = [toEntry, ...prev.slice(0, 199)];
-      
+
       // Debug contract filtering
       const contractCount = newFeed.filter(item => item.isContractDeployment === true).length;
       console.log('Updated toParameterFeed:', {
@@ -148,10 +227,11 @@ export const WebSocketProvider = ({ children }) => {
           hasInput: toEntry.hasInput
         }
       });
+
       return newFeed;
     });
 
-    // 🔥 NEW: Save contract deployment to Supabase
+    // 🔥 ENHANCED: Save contract deployment with immediate verification trigger
     if (isContractDeployment) {
       try {
         const deploymentData = {
@@ -168,16 +248,16 @@ export const WebSocketProvider = ({ children }) => {
           status: 'pending'
         };
 
-        console.log('💾 Saving contract deployment to Supabase:', {
+        console.log('💾 Saving contract deployment with immediate verification:', {
           txHash: txHash?.slice(0, 10) + '...',
           fromAddress: fromAddress?.slice(0, 10) + '...',
           inputSize: deploymentData.input_size
         });
 
-        await saveContractDeployment(deploymentData);
-        addDebugMessage(`💾 Contract deployment saved to Supabase: ${txHash?.slice(0, 10)}...`);
+        await saveContractDeploymentWithVerification(deploymentData);
+        addDebugMessage(`💾 Contract deployment saved with auto-verification: ${txHash?.slice(0, 10)}...`);
       } catch (error) {
-        console.error('❌ Error saving contract deployment to Supabase:', error);
+        console.error('❌ Error saving contract deployment with verification:', error);
         addDebugMessage(`❌ Failed to save contract deployment: ${error.message}`);
       }
     }
@@ -209,6 +289,7 @@ export const WebSocketProvider = ({ children }) => {
       if (currentState === WebSocket.OPEN || currentState === WebSocket.CONNECTING) {
         wsRef.current.close(1000, 'Manual disconnect');
       }
+
       wsRef.current = null;
     }
 
@@ -256,6 +337,7 @@ export const WebSocketProvider = ({ children }) => {
       oldWs.onopen = null;
       oldWs.onerror = null;
       oldWs.onclose = null;
+
       if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
         oldWs.close();
       }
@@ -310,8 +392,10 @@ export const WebSocketProvider = ({ children }) => {
         }
 
         messageCount.current++;
+
         try {
           const data = JSON.parse(event.data);
+
           // Log ALL messages for debugging
           addDebugMessage(`📨 [${messageCount.current}] Alchemy message: ${JSON.stringify(data).substring(0, 100)}...`);
 
@@ -418,12 +502,14 @@ export const WebSocketProvider = ({ children }) => {
     // Handle subscription data
     if (data.method === 'eth_subscription') {
       addDebugMessage(`🎯 Alchemy subscription data received: ${JSON.stringify(data).substring(0, 200)}...`);
+
       const { subscription, result } = data.params;
 
       // Get the subscription ID to know which subscription this is from
       const subId = Object.keys(subscriptionIds.current).find(
         key => subscriptionIds.current[key] === subscription
       );
+
       addDebugMessage(`📋 Alchemy Subscription ID: ${subscription}, Original ID: ${subId}`);
 
       // Handle Alchemy pending transactions (should be full transaction objects)
@@ -431,14 +517,16 @@ export const WebSocketProvider = ({ children }) => {
         // This is a full transaction object from alchemy_pendingTransactions
         const txData = result;
         const txHash = txData.hash;
+
         addDebugMessage(`🎯 Alchemy full transaction received: ${txHash.slice(0, 10)}...`);
 
-        // Add to 'to' parameter feed for analysis (this will also save to Supabase)
+        // Add to 'to' parameter feed for analysis (this will also save to Supabase with verification)
         addToParameterEntry(txHash, txData);
 
         // Log key details for debugging
         const toAddress = txData.to;
         const hasInput = txData.input && txData.input !== '0x' && txData.input.length > 2;
+
         addDebugMessage(`🔍 Alchemy TX: ${txHash.slice(0, 10)}... | to: ${toAddress || 'NULL'} | input: ${hasInput ? 'YES' : 'NO'} | inputLen: ${txData.input?.length || 0}`);
 
         // Check if this is a contract deployment (to field is null/undefined AND has input)
@@ -450,6 +538,7 @@ export const WebSocketProvider = ({ children }) => {
 
         if (isContractDeployment) {
           addDebugMessage(`🏭 Alchemy contract deployment detected: ${txHash.slice(0, 10)}...`);
+
           const deployment = {
             id: Date.now() + Math.random(),
             hash: txHash,
@@ -470,6 +559,7 @@ export const WebSocketProvider = ({ children }) => {
       // Handle liquidity events (PairCreated)
       else if (result && result.topics && result.topics[0] === PAIR_CREATED_TOPIC) {
         addDebugMessage('💧 Alchemy liquidity event detected!');
+
         const liquidityEvent = {
           id: Date.now() + Math.random(),
           type: 'PairCreated',
@@ -537,6 +627,7 @@ export const WebSocketProvider = ({ children }) => {
   // Alternative connection method using HTTP
   const tryAlternativeConnection = () => {
     addDebugMessage('🔄 Trying Alchemy HTTP alternative...');
+
     const httpRequest = {
       jsonrpc: '2.0',
       method: 'eth_blockNumber',
@@ -605,6 +696,7 @@ export const WebSocketProvider = ({ children }) => {
   // Generate mock data for demo
   const generateMockData = () => {
     addDebugMessage('🎭 Generating mock data for Alchemy demo');
+
     const mockContracts = [
       {
         id: Date.now() + Math.random(),
@@ -650,15 +742,29 @@ export const WebSocketProvider = ({ children }) => {
     setToParameterFeed([]);
     setTotalToParameterEntriesReceived(0);
     addDebugMessage('🧹 Cleared Alchemy \'to\' parameter feed and reset counter');
-    
+
     // Also clear Supabase data
     try {
-      await clearAllContractDeployments();
-      addDebugMessage('🧹 Cleared all contract deployments from Supabase');
+      const { default: supabase } = await import('../lib/supabase');
+      const { error } = await supabase
+        .from('contract_deployments_monitor_7x9k2a')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all records
+
+      if (error) {
+        console.error('❌ Error clearing Supabase data:', error);
+        addDebugMessage(`❌ Error clearing Supabase data: ${error.message}`);
+      } else {
+        addDebugMessage('🧹 Cleared all contract deployments from Supabase');
+      }
     } catch (error) {
       console.error('❌ Error clearing Supabase data:', error);
       addDebugMessage(`❌ Error clearing Supabase data: ${error.message}`);
     }
+  };
+
+  const generateEtherscanUrl = (txHash) => {
+    return `https://etherscan.io/tx/${txHash}`;
   };
 
   // Initialize with mock data

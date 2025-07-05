@@ -9,13 +9,14 @@ import ActivityChart from '../components/ActivityChart';
 import DebugPanel from '../components/DebugPanel';
 import RawResponseViewer from '../components/RawResponseViewer';
 import ToParameterViewer from '../components/ToParameterViewer';
+import ContractVerificationPanel from '../components/ContractVerificationPanel';
+import RealtimeTestPanel from '../components/RealtimeTestPanel';
 
 const { FiTrendingUp, FiTrendingDown, FiActivity, FiDollarSign } = FiIcons;
 
 const Dashboard = () => {
   const { liquidityEvents, connectionStatus } = useWebSocket();
   const { contractDeployments, getStatistics } = useContractDeployments();
-
   const contractStats = getStatistics();
 
   const stats = [
@@ -65,6 +66,7 @@ const Dashboard = () => {
         </div>
       </motion.div>
 
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, index) => (
           <motion.div
@@ -79,6 +81,7 @@ const Dashboard = () => {
         ))}
       </div>
 
+      {/* Top Row: Debug Panel and Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
@@ -109,8 +112,13 @@ const Dashboard = () => {
               .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
               .slice(0, 5)
               .map((item, index) => (
-                <div key={item.id || index} className="flex items-center space-x-3 p-3 bg-gray-700 rounded-lg">
-                  <div className={`w-2 h-2 rounded-full ${item.type === 'contract' ? 'bg-cyber-400' : 'bg-matrix-400'}`}></div>
+                <div
+                  key={item.id || index}
+                  className="flex items-center space-x-3 p-3 bg-gray-700 rounded-lg"
+                >
+                  <div className={`w-2 h-2 rounded-full ${
+                    item.type === 'contract' ? 'bg-cyber-400' : 'bg-matrix-400'
+                  }`}></div>
                   <div className="flex-1">
                     <p className="text-white text-sm font-medium">
                       {item.type === 'contract' ? 'Contract Deployed' : 'Liquidity Pool Created'}
@@ -124,7 +132,6 @@ const Dashboard = () => {
                   </span>
                 </div>
               ))}
-
             {contractDeployments.length === 0 && liquidityEvents.length === 0 && (
               <div className="text-center py-8 text-gray-400">
                 <p>Waiting for blockchain events...</p>
@@ -135,11 +142,33 @@ const Dashboard = () => {
         </motion.div>
       </div>
 
+      {/* Contract Verification Panel - MOVED UP FOR BETTER VISIBILITY */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.6 }}
+        className="motion-prevent-jump"
+      >
+        <ContractVerificationPanel />
+      </motion.div>
+
+      {/* Contract Deployment Monitor */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.7 }}
+        className="motion-prevent-jump"
+        style={{ willChange: 'transform' }}
+      >
+        <ToParameterViewer />
+      </motion.div>
+
+      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.6 }}
+          transition={{ duration: 0.5, delay: 0.8 }}
           className="motion-prevent-jump"
         >
           <ActivityChart />
@@ -148,22 +177,21 @@ const Dashboard = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.7 }}
+          transition={{ duration: 0.5, delay: 0.9 }}
           className="motion-prevent-jump"
         >
           <RawResponseViewer />
         </motion.div>
       </div>
 
-      {/* Contract Deployment Monitor */}
+      {/* Real-time Test Panel */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.8 }}
+        transition={{ duration: 0.5, delay: 1.0 }}
         className="motion-prevent-jump"
-        style={{ willChange: 'transform' }}
       >
-        <ToParameterViewer />
+        <RealtimeTestPanel />
       </motion.div>
     </div>
   );

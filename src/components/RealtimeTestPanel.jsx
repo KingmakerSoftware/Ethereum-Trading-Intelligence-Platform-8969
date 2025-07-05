@@ -55,11 +55,11 @@ const RealtimeTestPanel = () => {
     setTestStatus('testing');
     setTestMessage('');
     addDebugLog('🔄 Starting real-time test...', 'info');
-    
+
     try {
       addDebugLog(`📊 Current real-time status: ${realtimeStatus}`, 'info');
       addDebugLog(`📊 Current deployments count: ${contractDeployments.length}`, 'info');
-      
+
       setTestMessage('📝 Inserting test record to database...');
       addDebugLog('📝 Calling testRealtimeConnection...', 'info');
       
@@ -71,7 +71,7 @@ const RealtimeTestPanel = () => {
       
       setTestStatus('success');
       setTestMessage(`✅ Test record inserted! Hash: ${record.transaction_hash.slice(0, 20)}... - Waiting for real-time update...`);
-      
+
       // Check if record appears in UI after 5 seconds
       setTimeout(() => {
         const recordInUI = contractDeployments.some(deployment => 
@@ -86,14 +86,14 @@ const RealtimeTestPanel = () => {
           setTestMessage(prev => prev + ' ❌ Real-time may not be working properly.');
         }
       }, 5000);
-      
+
       // Reset after 25 seconds
       setTimeout(() => {
         setTestStatus('idle');
         setTestMessage('');
         setTestRecord(null);
       }, 25000);
-      
+
     } catch (error) {
       addDebugLog(`❌ Test failed: ${error.message}`, 'error');
       setTestStatus('error');
@@ -112,7 +112,7 @@ const RealtimeTestPanel = () => {
     setTestStatus('testing');
     setTestMessage('');
     addDebugLog('🔄 Starting direct insert test...', 'info');
-    
+
     try {
       // Import supabase directly for this test
       const { createClient } = await import('@supabase/supabase-js');
@@ -120,7 +120,7 @@ const RealtimeTestPanel = () => {
         'https://caxwxxqlyznymadgaqwj.supabase.co',
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNheHd4eHFseXpueW1hZGdhcXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE1MTIyNjgsImV4cCI6MjA2NzA4ODI2OH0.vHj0fZ8k77GUcEzg96BDiq8ilv77TeQTI6Ol97k6bnM'
       );
-      
+
       const testRecord = {
         transaction_hash: `0xDIRECT_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
         from_address: '0x1234567890123456789012345678901234567890',
@@ -133,11 +133,12 @@ const RealtimeTestPanel = () => {
         nonce: '0x1',
         detected_at: new Date().toISOString(),
         status: 'direct_test',
+        verification_status: 'pending',
         etherscan_url: 'https://etherscan.io/tx/0xtest'
       };
 
       addDebugLog(`📝 Direct insert test record: ${testRecord.transaction_hash}`, 'info');
-      
+
       const { data, error } = await supabase
         .from('contract_deployments_monitor_7x9k2a')
         .insert(testRecord)
@@ -151,7 +152,7 @@ const RealtimeTestPanel = () => {
       setTestRecord(testRecord);
       setTestStatus('success');
       setTestMessage(`✅ Direct insert successful! Hash: ${testRecord.transaction_hash.slice(0, 20)}... - Waiting for real-time update...`);
-      
+
       // Check if record appears in UI after 5 seconds
       setTimeout(() => {
         const recordInUI = contractDeployments.some(deployment => 
@@ -166,7 +167,7 @@ const RealtimeTestPanel = () => {
           setTestMessage(prev => prev + ' ❌ Real-time may not be working properly.');
         }
       }, 5000);
-      
+
       // Clean up after 15 seconds
       setTimeout(async () => {
         try {
@@ -174,19 +175,20 @@ const RealtimeTestPanel = () => {
             .from('contract_deployments_monitor_7x9k2a')
             .delete()
             .eq('transaction_hash', testRecord.transaction_hash);
+          
           addDebugLog('✅ Direct test record cleaned up', 'info');
         } catch (cleanupError) {
           addDebugLog(`❌ Error cleaning up direct test record: ${cleanupError.message}`, 'error');
         }
       }, 15000);
-      
+
       // Reset after 25 seconds
       setTimeout(() => {
         setTestStatus('idle');
         setTestMessage('');
         setTestRecord(null);
       }, 25000);
-      
+
     } catch (error) {
       addDebugLog(`❌ Direct insert failed: ${error.message}`, 'error');
       setTestStatus('error');
@@ -211,7 +213,7 @@ const RealtimeTestPanel = () => {
         'https://caxwxxqlyznymadgaqwj.supabase.co',
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNheHd4eHFseXpueW1hZGdhcXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE1MTIyNjgsImV4cCI6MjA2NzA4ODI2OH0.vHj0fZ8k77GUcEzg96BDiq8ilv77TeQTI6Ol97k6bnM'
       );
-      
+
       const testChannel = supabase.channel('test_realtime_channel');
       
       testChannel
@@ -226,13 +228,13 @@ const RealtimeTestPanel = () => {
         .subscribe((status) => {
           addDebugLog(`📡 Test subscription status: ${status}`, 'info');
         });
-      
+
       // Clean up after 30 seconds
       setTimeout(() => {
         testChannel.unsubscribe();
         addDebugLog('🔌 Test subscription cleaned up', 'info');
       }, 30000);
-      
+
     } catch (error) {
       addDebugLog(`❌ Real-time subscription test failed: ${error.message}`, 'error');
     }
@@ -322,7 +324,6 @@ const RealtimeTestPanel = () => {
           <p className="text-gray-400 text-sm mb-4">
             This will insert a test record and verify if it appears automatically in the contract deployment list.
           </p>
-          
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={handleTest}
@@ -342,7 +343,6 @@ const RealtimeTestPanel = () => {
                  'Test Real-time'}
               </span>
             </button>
-            
             <button
               onClick={handleDirectInsert}
               disabled={testStatus === 'testing'}
@@ -351,7 +351,6 @@ const RealtimeTestPanel = () => {
               <SafeIcon icon={FiTestTube} className={testStatus === 'testing' ? 'animate-spin' : ''} />
               <span>Direct Insert Test</span>
             </button>
-            
             <button
               onClick={testRealtimeSubscription}
               className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -360,7 +359,6 @@ const RealtimeTestPanel = () => {
               <span>Test Subscription</span>
             </button>
           </div>
-          
           {testMessage && (
             <div className={`mt-4 p-3 rounded-lg text-sm ${
               testStatus === 'success' ? 'bg-green-900/20 border border-green-500/30 text-green-400' :
@@ -370,7 +368,6 @@ const RealtimeTestPanel = () => {
               {testMessage}
             </div>
           )}
-
           {testRecord && (
             <div className="mt-4 p-3 bg-gray-800 rounded-lg border border-gray-600">
               <h5 className="text-white font-medium mb-2">Test Record Details:</h5>
@@ -394,11 +391,11 @@ const RealtimeTestPanel = () => {
                 <div>
                   <span className="text-gray-400">In UI:</span>
                   <span className={`ml-2 ${
-                    contractDeployments.some(d => d.transaction_hash === testRecord.transaction_hash) 
-                      ? 'text-green-400' : 'text-red-400'
+                    contractDeployments.some(d => d.transaction_hash === testRecord.transaction_hash) ? 
+                    'text-green-400' : 'text-red-400'
                   }`}>
-                    {contractDeployments.some(d => d.transaction_hash === testRecord.transaction_hash) 
-                      ? 'YES ✅' : 'NO ❌'}
+                    {contractDeployments.some(d => d.transaction_hash === testRecord.transaction_hash) ? 
+                     'YES ✅' : 'NO ❌'}
                   </span>
                 </div>
               </div>

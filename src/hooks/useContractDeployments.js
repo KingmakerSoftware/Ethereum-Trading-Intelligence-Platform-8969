@@ -16,6 +16,36 @@ export const useContractDeployments = () => {
     return `https://etherscan.io/tx/${txHash}`;
   };
 
+  // Test real-time connection by inserting a test record
+  const testRealtimeConnection = async () => {
+    const testRecord = {
+      transaction_hash: `0xTEST_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      from_address: '0x' + Math.random().toString(36).substring(2, 8).repeat(5),
+      to_address: null,
+      input_data: '0x608060405234801561001057600080fd5b50' + Math.random().toString(36).substring(2, 20),
+      input_size: '50 bytes',
+      gas_price: '0x' + Math.floor(Math.random() * 1000000).toString(16),
+      gas_limit: '0x' + Math.floor(Math.random() * 500000).toString(16),
+      value: '0x0',
+      nonce: '0x' + Math.floor(Math.random() * 100).toString(16),
+      detected_at: new Date().toISOString(),
+      status: 'test_realtime',
+      verification_status: 'pending',
+      etherscan_url: `https://etherscan.io/tx/0xtest${Date.now()}`
+    };
+
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .insert(testRecord)
+      .select();
+
+    if (error) {
+      throw error;
+    }
+
+    return testRecord;
+  };
+
   // Initialize table and enable real-time
   const initializeTable = async () => {
     try {
@@ -67,7 +97,8 @@ export const useContractDeployments = () => {
         sample: data?.slice(0, 3).map(d => ({
           hash: d.transaction_hash?.slice(0, 10) + '...',
           detected: d.detected_at,
-          from: d.from_address?.slice(0, 10) + '...'
+          from: d.from_address?.slice(0, 10) + '...',
+          verificationStatus: d.verification_status || 'pending'
         }))
       });
 
@@ -102,6 +133,7 @@ export const useContractDeployments = () => {
         detected_at: deploymentData.detected_at || new Date().toISOString(),
         status: deploymentData.status || 'pending',
         contract_address: deploymentData.contract_address,
+        verification_status: 'pending', // Add verification status
         etherscan_url: etherscanUrl
       };
 
@@ -109,7 +141,8 @@ export const useContractDeployments = () => {
         txHash: dataToSave.transaction_hash?.slice(0, 10) + '...',
         fromAddress: dataToSave.from_address?.slice(0, 10) + '...',
         etherscanUrl: etherscanUrl,
-        detected_at: dataToSave.detected_at
+        detected_at: dataToSave.detected_at,
+        verification_status: dataToSave.verification_status
       });
 
       const { data, error } = await supabase
@@ -248,6 +281,30 @@ export const useContractDeployments = () => {
     } catch (err) {
       console.error('❌ Error in deleteContractDeployment:', err);
       setError(`Delete failed: ${err.message}`);
+      throw err;
+    }
+  };
+
+  // Clear all contract deployments
+  const clearAllContractDeployments = async () => {
+    try {
+      console.log('🧹 Clearing all contract deployments...');
+      
+      const { error } = await supabase
+        .from(TABLE_NAME)
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all records
+
+      if (error) {
+        console.error('❌ Error clearing all contract deployments:', error);
+        throw error;
+      }
+
+      console.log('✅ All contract deployments cleared');
+      setContractDeployments([]);
+    } catch (err) {
+      console.error('❌ Error in clearAllContractDeployments:', err);
+      setError(err.message);
       throw err;
     }
   };
@@ -443,8 +500,10 @@ export const useContractDeployments = () => {
     saveContractDeployment,
     updateContractDeployment,
     deleteContractDeployment,
+    clearAllContractDeployments,
     fetchContractDeployments,
     getStatistics,
-    generateEtherscanUrl
+    generateEtherscanUrl,
+    testRealtimeConnection
   };
 };
