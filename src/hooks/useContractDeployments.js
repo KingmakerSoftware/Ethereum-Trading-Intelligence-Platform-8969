@@ -7,7 +7,6 @@ export const useContractDeployments = () => {
   const [contractDeployments, setContractDeployments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [lastFetch, setLastFetch] = useState(null);
   const [realtimeStatus, setRealtimeStatus] = useState('disconnected');
   const subscriptionRef = useRef(null);
   const channelRef = useRef(null);
@@ -27,18 +26,14 @@ export const useContractDeployments = () => {
         .from(TABLE_NAME)
         .select('id')
         .limit(1);
-      
+
       if (testError) {
         console.error('❌ Table access error:', testError);
         setError(`Table access failed: ${testError.message}`);
         return;
       }
-      
+
       console.log('✅ Table is accessible');
-      
-      // Enable real-time on the table (this might need to be done in Supabase dashboard)
-      console.log('📡 Real-time should be enabled on the table in Supabase dashboard');
-      
     } catch (error) {
       console.error('❌ Error initializing table:', error);
       setError(`Table initialization failed: ${error.message}`);
@@ -51,7 +46,7 @@ export const useContractDeployments = () => {
       if (!silent) {
         setLoading(true);
       }
-      
+
       console.log('🔄 Fetching contract deployments from Supabase...');
       
       const { data, error } = await supabase
@@ -75,10 +70,9 @@ export const useContractDeployments = () => {
           from: d.from_address?.slice(0, 10) + '...'
         }))
       });
-      
+
       setContractDeployments(data || []);
       setError(null);
-      setLastFetch(new Date());
     } catch (err) {
       console.error('❌ Error in fetchContractDeployments:', err);
       setError(err.message);
@@ -120,9 +114,9 @@ export const useContractDeployments = () => {
 
       const { data, error } = await supabase
         .from(TABLE_NAME)
-        .upsert(dataToSave, { 
+        .upsert(dataToSave, {
           onConflict: 'transaction_hash',
-          ignoreDuplicates: false 
+          ignoreDuplicates: false
         })
         .select();
 
@@ -132,7 +126,6 @@ export const useContractDeployments = () => {
       }
 
       console.log('✅ Contract deployment saved successfully:', data);
-      
       return data;
     } catch (err) {
       console.error('❌ Error in saveContractDeployment:', err);
@@ -159,7 +152,6 @@ export const useContractDeployments = () => {
       }
 
       console.log('✅ Contract deployment updated:', data);
-      
       return data;
     } catch (err) {
       console.error('❌ Error in updateContractDeployment:', err);
@@ -168,51 +160,94 @@ export const useContractDeployments = () => {
     }
   };
 
-  // Delete contract deployment
+  // Delete contract deployment - ENHANCED VERSION
   const deleteContractDeployment = async (txHash) => {
     try {
-      const { error } = await supabase
+      console.log('🗑️ Starting deletion process for:', txHash);
+      
+      // First, verify the record exists
+      const { data: existingRecord, error: findError } = await supabase
         .from(TABLE_NAME)
-        .delete()
-        .eq('transaction_hash', txHash);
+        .select('id, transaction_hash')
+        .eq('transaction_hash', txHash)
+        .single();
 
-      if (error) {
-        console.error('❌ Error deleting contract deployment:', error);
-        throw error;
+      if (findError) {
+        console.error('❌ Error finding record to delete:', findError);
+        if (findError.code === 'PGRST116') {
+          console.log('⚠️ Record not found in database, removing from UI only');
+          setContractDeployments(prev => 
+            prev.filter(deployment => deployment.transaction_hash !== txHash)
+          );
+          return;
+        }
+        throw findError;
       }
 
-      console.log('✅ Contract deployment deleted:', txHash);
+      console.log('✅ Found record to delete:', {
+        id: existingRecord.id,
+        txHash: existingRecord.transaction_hash?.slice(0, 20) + '...'
+      });
+
+      // Now delete the record
+      const { data: deletedData, error: deleteError } = await supabase
+        .from(TABLE_NAME)
+        .delete()
+        .eq('transaction_hash', txHash)
+        .select();
+
+      if (deleteError) {
+        console.error('❌ Error deleting contract deployment:', deleteError);
+        console.error('Delete error details:', {
+          code: deleteError.code,
+          message: deleteError.message,
+          details: deleteError.details,
+          hint: deleteError.hint
+        });
+        throw deleteError;
+      }
+
+      console.log('✅ Contract deployment deleted from database:', {
+        txHash: txHash?.slice(0, 20) + '...',
+        deletedRecords: deletedData?.length || 0,
+        deletedData: deletedData
+      });
       
+      // Update local state to immediately remove the item
+      setContractDeployments(prev => {
+        const newDeployments = prev.filter(deployment => deployment.transaction_hash !== txHash);
+        console.log('🔄 Updated local state:', {
+          before: prev.length,
+          after: newDeployments.length,
+          removed: prev.length - newDeployments.length
+        });
+        return newDeployments;
+      });
+
+      // Verify deletion worked by checking if record still exists
+      setTimeout(async () => {
+        try {
+          const { data: verifyData, error: verifyError } = await supabase
+            .from(TABLE_NAME)
+            .select('id')
+            .eq('transaction_hash', txHash)
+            .single();
+
+          if (verifyError && verifyError.code === 'PGRST116') {
+            console.log('✅ Deletion verified: Record no longer exists in database');
+          } else if (verifyData) {
+            console.error('❌ Deletion failed: Record still exists in database');
+            // Refresh the data to show the record is still there
+            await fetchContractDeployments(true);
+          }
+        } catch (verifyErr) {
+          console.log('✅ Deletion verification completed (record not found)');
+        }
+      }, 1000);
+
     } catch (err) {
       console.error('❌ Error in deleteContractDeployment:', err);
-      setError(err.message);
-      throw err;
-    }
-  };
-
-  // Clear all contract deployments
-  const clearAllContractDeployments = async () => {
-    try {
-      console.log('🗑️ Clearing all contract deployments...');
-      
-      const { error } = await supabase
-        .from(TABLE_NAME)
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all records
-
-      if (error) {
-        console.error('❌ Error clearing contract deployments:', error);
-        throw error;
-      }
-
-      console.log('✅ All contract deployments cleared');
-      
-      // Immediately update the local state
-      setContractDeployments([]);
-      
-    } catch (err) {
-      console.error('❌ Error in clearAllContractDeployments:', err);
-      setError(err.message);
+      setError(`Delete failed: ${err.message}`);
       throw err;
     }
   };
@@ -224,7 +259,7 @@ export const useContractDeployments = () => {
     const todayCount = contractDeployments.filter(deployment => 
       new Date(deployment.detected_at).toDateString() === today
     ).length;
-    
+
     const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const last24HoursCount = contractDeployments.filter(deployment => 
       new Date(deployment.detected_at) > last24Hours
@@ -237,10 +272,10 @@ export const useContractDeployments = () => {
     };
   };
 
-  // Set up real-time subscription with enhanced debugging
+  // Set up real-time subscription
   const setupRealtimeSubscription = () => {
     console.log('🔄 Setting up real-time subscription...');
-    
+
     // Clean up existing subscription
     if (channelRef.current) {
       console.log('🧹 Cleaning up existing real-time subscription');
@@ -259,7 +294,7 @@ export const useContractDeployments = () => {
     try {
       // Create new channel with specific table subscription
       const channel = supabase.channel(channelName);
-      
+
       // Subscribe to postgres changes with specific table
       channel
         .on('postgres_changes', {
@@ -273,56 +308,56 @@ export const useContractDeployments = () => {
             timestamp: new Date().toISOString(),
             hasNewData: !!payload.new,
             hasOldData: !!payload.old,
-            newTxHash: payload.new?.transaction_hash?.slice(0, 20) + '...' || 'N/A'
+            newTxHash: payload.new?.transaction_hash?.slice(0, 20) + '...' || 'N/A',
+            oldTxHash: payload.old?.transaction_hash?.slice(0, 20) + '...' || 'N/A'
           });
 
           // Handle different event types
           switch (payload.eventType) {
             case 'INSERT':
               console.log('➕ [REALTIME-INSERT] New contract deployment detected via real-time');
-              console.log('📝 [REALTIME-INSERT] New record data:', {
-                id: payload.new.id,
-                txHash: payload.new.transaction_hash?.slice(0, 20) + '...',
-                status: payload.new.status,
-                detected_at: payload.new.detected_at
-              });
-              
               setContractDeployments(prev => {
                 // Check if this record already exists by transaction_hash
                 const exists = prev.some(item => 
                   item.transaction_hash === payload.new.transaction_hash
                 );
+                
                 if (exists) {
                   console.log('⚠️ [REALTIME-INSERT] Record already exists, skipping duplicate');
                   return prev;
                 }
+                
                 console.log('✅ [REALTIME-INSERT] Adding new record to state');
-                const newState = [payload.new, ...prev];
-                console.log('📊 [REALTIME-INSERT] New state count:', newState.length);
-                return newState;
+                return [payload.new, ...prev];
               });
               break;
-            
+
             case 'UPDATE':
               console.log('🔄 [REALTIME-UPDATE] Contract deployment updated via real-time');
-              console.log('📝 [REALTIME-UPDATE] Updated record data:', payload.new);
-              
               setContractDeployments(prev => 
                 prev.map(item => 
                   item.id === payload.new.id ? payload.new : item
                 )
               );
               break;
-            
+
             case 'DELETE':
               console.log('🗑️ [REALTIME-DELETE] Contract deployment deleted via real-time');
-              console.log('📝 [REALTIME-DELETE] Deleted record data:', payload.old);
-              
-              setContractDeployments(prev => 
-                prev.filter(item => item.id !== payload.old.id)
-              );
+              console.log('🗑️ [REALTIME-DELETE] Removing from state:', {
+                oldId: payload.old?.id,
+                oldTxHash: payload.old?.transaction_hash?.slice(0, 20) + '...'
+              });
+              setContractDeployments(prev => {
+                const newState = prev.filter(item => item.id !== payload.old.id);
+                console.log('🗑️ [REALTIME-DELETE] State updated:', {
+                  before: prev.length,
+                  after: newState.length,
+                  removed: prev.length - newState.length
+                });
+                return newState;
+              });
               break;
-            
+
             default:
               console.log('❓ [REALTIME-UNKNOWN] Unknown real-time event:', payload.eventType);
               // For unknown events, just refresh the data
@@ -332,14 +367,13 @@ export const useContractDeployments = () => {
         .subscribe((status) => {
           console.log('📡 [REALTIME-STATUS] Real-time subscription status changed:', status);
           setRealtimeStatus(status);
-          
+
           if (status === 'SUBSCRIBED') {
             console.log('✅ [REALTIME-STATUS] Real-time subscription is now active!');
             console.log('🎉 [REALTIME-STATUS] Listening for changes on table:', TABLE_NAME);
           } else if (status === 'CHANNEL_ERROR') {
             console.error('❌ [REALTIME-STATUS] Real-time subscription error');
             setRealtimeStatus('error');
-            
             // Retry after delay
             setTimeout(() => {
               console.log('🔄 [REALTIME-STATUS] Retrying real-time subscription after error...');
@@ -348,7 +382,6 @@ export const useContractDeployments = () => {
           } else if (status === 'TIMED_OUT') {
             console.error('⏰ [REALTIME-STATUS] Real-time subscription timed out');
             setRealtimeStatus('timeout');
-            
             // Retry after delay
             setTimeout(() => {
               console.log('🔄 [REALTIME-STATUS] Retrying real-time subscription after timeout...');
@@ -361,7 +394,6 @@ export const useContractDeployments = () => {
         });
 
       channelRef.current = channel;
-      
     } catch (error) {
       console.error('❌ [REALTIME-ERROR] Error setting up real-time subscription:', error);
       setRealtimeStatus('error');
@@ -382,6 +414,7 @@ export const useContractDeployments = () => {
   useEffect(() => {
     if (!loading) {
       console.log('🔄 Setting up real-time subscription after initial load');
+      
       // Small delay to ensure everything is ready
       setTimeout(() => {
         setupRealtimeSubscription();
@@ -402,87 +435,16 @@ export const useContractDeployments = () => {
     };
   }, [loading]);
 
-  // Add a manual refresh function for debugging
-  const forceRefresh = () => {
-    console.log('🔄 Force refreshing contract deployments...');
-    fetchContractDeployments();
-  };
-
-  // Enhanced test real-time connection with better error handling
-  const testRealtimeConnection = async () => {
-    console.log('🧪 [REALTIME-TEST] Testing real-time connection...');
-    
-    try {
-      // Generate a unique test record
-      const testRecord = {
-        transaction_hash: `0xTEST_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        from_address: '0x1234567890123456789012345678901234567890',
-        to_address: null,
-        input_data: '0x608060405234801561001057600080fd5b50',
-        input_size: '21 bytes',
-        gas_price: '0x5d21dba00',
-        gas_limit: '0x5208',
-        value: '0x0',
-        nonce: '0x1',
-        detected_at: new Date().toISOString(),
-        status: 'test',
-        etherscan_url: 'https://etherscan.io/tx/0xtest'
-      };
-
-      console.log('📝 [REALTIME-TEST] Inserting test record:', testRecord.transaction_hash);
-      console.log('📊 [REALTIME-TEST] Current real-time status:', realtimeStatus);
-      console.log('📊 [REALTIME-TEST] Current deployments count:', contractDeployments.length);
-      
-      // First, try to insert the record
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .insert(testRecord)
-        .select();
-
-      if (error) {
-        console.error('❌ [REALTIME-TEST] Error inserting test record:', error);
-        throw error;
-      }
-
-      console.log('✅ [REALTIME-TEST] Test record inserted successfully:', data);
-      
-      // Clean up test record after 15 seconds
-      setTimeout(async () => {
-        try {
-          console.log('🧹 [REALTIME-TEST] Cleaning up test record...');
-          await supabase
-            .from(TABLE_NAME)
-            .delete()
-            .eq('transaction_hash', testRecord.transaction_hash);
-          console.log('✅ [REALTIME-TEST] Test record cleaned up');
-        } catch (cleanupError) {
-          console.error('❌ [REALTIME-TEST] Error cleaning up test record:', cleanupError);
-        }
-      }, 15000);
-
-      return testRecord;
-
-    } catch (error) {
-      console.error('❌ [REALTIME-TEST] Real-time test failed:', error);
-      setError(`Real-time test failed: ${error.message}`);
-      throw error;
-    }
-  };
-
   return {
     contractDeployments,
     loading,
     error,
-    lastFetch,
     realtimeStatus,
     saveContractDeployment,
     updateContractDeployment,
     deleteContractDeployment,
-    clearAllContractDeployments,
     fetchContractDeployments,
-    forceRefresh,
     getStatistics,
-    generateEtherscanUrl,
-    testRealtimeConnection
+    generateEtherscanUrl
   };
 };
