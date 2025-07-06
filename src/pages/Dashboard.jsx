@@ -10,6 +10,7 @@ import DebugPanel from '../components/DebugPanel';
 import RawResponseViewer from '../components/RawResponseViewer';
 import ToParameterViewer from '../components/ToParameterViewer';
 import ContractVerificationPanel from '../components/ContractVerificationPanel';
+import LiquidityMonitoringPanel from '../components/LiquidityMonitoringPanel';
 import RealtimeTestPanel from '../components/RealtimeTestPanel';
 
 const { FiTrendingUp, FiTrendingDown, FiActivity, FiDollarSign } = FiIcons;
@@ -91,7 +92,6 @@ const Dashboard = () => {
         >
           <DebugPanel />
         </motion.div>
-
         <motion.div
           className="bg-gray-800 rounded-xl p-6 border border-gray-700"
           initial={{ opacity: 0, x: 20 }}
@@ -142,7 +142,7 @@ const Dashboard = () => {
         </motion.div>
       </div>
 
-      {/* Contract Verification Panel - MOVED UP FOR BETTER VISIBILITY */}
+      {/* Contract Verification Panel */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -150,6 +150,16 @@ const Dashboard = () => {
         className="motion-prevent-jump"
       >
         <ContractVerificationPanel />
+      </motion.div>
+
+      {/* 🔥 NEW: Liquidity Monitoring Panel */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.65 }}
+        className="motion-prevent-jump"
+      >
+        <LiquidityMonitoringPanel />
       </motion.div>
 
       {/* Contract Deployment Monitor */}
@@ -173,7 +183,6 @@ const Dashboard = () => {
         >
           <ActivityChart />
         </motion.div>
-
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
