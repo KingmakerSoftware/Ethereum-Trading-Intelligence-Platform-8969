@@ -6,6 +6,7 @@ import Header from './components/Header';
 import Dashboard from './pages/Dashboard';
 import RealTimeFeed from './pages/RealTimeFeed';
 import Analytics from './pages/Analytics';
+import Settings from './pages/Settings';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import './App.css';
 
@@ -18,7 +19,7 @@ function App() {
             <Sidebar />
             <div className="flex-1 ml-64">
               <Header />
-              <motion.main 
+              <motion.main
                 className="p-6"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -28,6 +29,7 @@ function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/feed" element={<RealTimeFeed />} />
                   <Route path="/analytics" element={<Analytics />} />
+                  <Route path="/settings" element={<Settings />} />
                 </Routes>
               </motion.main>
             </div>

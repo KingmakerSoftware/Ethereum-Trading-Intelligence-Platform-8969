@@ -17,12 +17,14 @@ export const useContractVerification = () => {
     failed: 0
   });
 
-  // Auto-verification queue
+  // Auto-verification queue and processing
   const [autoVerificationQueue, setAutoVerificationQueue] = useState([]);
   const [isAutoVerifying, setIsAutoVerifying] = useState(false);
-
-  // Verification in progress tracking
   const verificationInProgress = useRef(new Set());
+  const processedDeployments = useRef(new Set()); // Track processed deployments
+
+  // Auto-verification processing interval
+  const verificationIntervalRef = useRef(null);
 
   // Generate Etherscan URL for contract address
   const generateContractEtherscanUrl = (contractAddress) => {
@@ -33,7 +35,6 @@ export const useContractVerification = () => {
   const fetchTransactionReceipt = async (txHash) => {
     try {
       console.log('🔍 Fetching transaction receipt for:', txHash?.slice(0, 20) + '...');
-      
       const response = await fetch(ALCHEMY_HTTP_URL, {
         method: 'POST',
         headers: {
@@ -48,7 +49,7 @@ export const useContractVerification = () => {
       });
 
       const data = await response.json();
-      
+
       if (data.error) {
         throw new Error(`Alchemy API error: ${data.error.message}`);
       }
@@ -75,7 +76,7 @@ export const useContractVerification = () => {
   // Verify contract address for a transaction
   const verifyContractAddress = async (deploymentRecord) => {
     const txHash = deploymentRecord.transaction_hash;
-    
+
     // Prevent duplicate verification attempts
     if (verificationInProgress.current.has(txHash)) {
       console.log('⚠️ Verification already in progress for:', txHash?.slice(0, 20) + '...');
@@ -85,7 +86,7 @@ export const useContractVerification = () => {
     try {
       verificationInProgress.current.add(txHash);
       console.log('🔄 Starting contract verification for:', txHash?.slice(0, 20) + '...');
-      
+
       // Update deployment record to show verification is in progress
       await supabase
         .from(DEPLOYMENTS_TABLE)
@@ -159,6 +160,9 @@ export const useContractVerification = () => {
         console.log('✅ Contract saved successfully:', contractRecord);
       }
 
+      // Mark as processed
+      processedDeployments.current.add(txHash);
+
       // Refresh data after verification
       await Promise.all([
         fetchVerifiedContracts(),
@@ -171,9 +175,10 @@ export const useContractVerification = () => {
         contractAddress: receipt.contractAddress,
         receipt
       };
+
     } catch (error) {
       console.error('❌ Contract verification failed:', error);
-      
+
       // Update deployment record to show verification failed
       await supabase
         .from(DEPLOYMENTS_TABLE)
@@ -185,14 +190,14 @@ export const useContractVerification = () => {
 
       // Refresh stats even on failure
       await fetchVerificationStats();
-      
+
       throw error;
     } finally {
       verificationInProgress.current.delete(txHash);
     }
   };
 
-  // Auto-verify new deployments
+  // Auto-verify deployment with retry logic
   const autoVerifyDeployment = async (deploymentRecord) => {
     try {
       console.log('🤖 Auto-verifying deployment:', deploymentRecord.transaction_hash?.slice(0, 20) + '...');
@@ -203,9 +208,13 @@ export const useContractVerification = () => {
       await verifyContractAddress(deploymentRecord);
       
       console.log('✅ Auto-verification completed for:', deploymentRecord.transaction_hash?.slice(0, 20) + '...');
+      
+      return true;
     } catch (error) {
       console.error('❌ Auto-verification failed:', error);
+      
       // Don't throw error to prevent breaking the queue
+      return false;
     }
   };
 
@@ -219,16 +228,31 @@ export const useContractVerification = () => {
     console.log('🔄 Processing auto-verification queue:', autoVerificationQueue.length, 'items');
 
     try {
-      // Process one item at a time to avoid rate limiting
-      const deployment = autoVerificationQueue[0];
-      await autoVerifyDeployment(deployment);
-      
-      // Remove processed item from queue
-      setAutoVerificationQueue(prev => prev.slice(1));
+      // Process all items in the queue
+      const itemsToProcess = [...autoVerificationQueue];
+      const results = [];
+
+      for (const deployment of itemsToProcess) {
+        const success = await autoVerifyDeployment(deployment);
+        results.push({ deployment, success });
+        
+        // Remove processed item from queue
+        setAutoVerificationQueue(prev => prev.filter(item => 
+          item.transaction_hash !== deployment.transaction_hash
+        ));
+
+        // Add delay between verifications to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      console.log('✅ Auto-verification queue processed:', {
+        total: results.length,
+        successful: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length
+      });
+
     } catch (error) {
       console.error('❌ Error processing auto-verification queue:', error);
-      // Remove failed item from queue to prevent infinite loop
-      setAutoVerificationQueue(prev => prev.slice(1));
     } finally {
       setIsAutoVerifying(false);
     }
@@ -236,14 +260,20 @@ export const useContractVerification = () => {
 
   // Add deployment to auto-verification queue
   const queueDeploymentForVerification = (deploymentRecord) => {
+    // Skip if already processed
+    if (processedDeployments.current.has(deploymentRecord.transaction_hash)) {
+      console.log('⚠️ Deployment already processed, skipping:', deploymentRecord.transaction_hash?.slice(0, 20) + '...');
+      return;
+    }
+
     // Check if already in queue or already verified
     const alreadyQueued = autoVerificationQueue.some(
       item => item.transaction_hash === deploymentRecord.transaction_hash
     );
     
     const needsVerification = !deploymentRecord.verification_status || 
-                             deploymentRecord.verification_status === 'pending';
-
+                            deploymentRecord.verification_status === 'pending';
+    
     const alreadyInProgress = verificationInProgress.current.has(deploymentRecord.transaction_hash);
 
     if (!alreadyQueued && needsVerification && !alreadyInProgress) {
@@ -252,11 +282,50 @@ export const useContractVerification = () => {
     }
   };
 
+  // Enhanced queue processing for all pending deployments
+  const queueAllPendingDeployments = async () => {
+    try {
+      console.log('🔄 Checking for pending deployments to queue...');
+
+      // Get all deployments that need verification
+      const { data: allDeployments, error } = await supabase
+        .from(DEPLOYMENTS_TABLE)
+        .select('*')
+        .or('verification_status.is.null,verification_status.eq.pending')
+        .order('detected_at', { ascending: false });
+
+      if (error) {
+        console.error('❌ Error fetching pending deployments:', error);
+        return;
+      }
+
+      console.log('📊 Found pending deployments:', allDeployments?.length || 0);
+
+      // Queue new deployments
+      const newlyQueued = [];
+      allDeployments?.forEach(deployment => {
+        if (!processedDeployments.current.has(deployment.transaction_hash) &&
+            !autoVerificationQueue.some(item => item.transaction_hash === deployment.transaction_hash) &&
+            !verificationInProgress.current.has(deployment.transaction_hash)) {
+          
+          queueDeploymentForVerification(deployment);
+          newlyQueued.push(deployment.transaction_hash?.slice(0, 10) + '...');
+        }
+      });
+
+      if (newlyQueued.length > 0) {
+        console.log('📋 Newly queued deployments:', newlyQueued);
+      }
+
+    } catch (error) {
+      console.error('❌ Error queuing pending deployments:', error);
+    }
+  };
+
   // Fetch verified contracts from database
   const fetchVerifiedContracts = async () => {
     try {
       console.log('🔄 Fetching verified contracts...');
-      
       const { data, error } = await supabase
         .from(CONTRACTS_TABLE)
         .select('*')
@@ -285,15 +354,15 @@ export const useContractVerification = () => {
     }
   };
 
-  // Fetch verification statistics with real-time updates
+  // Fetch verification statistics with enhanced processing
   const fetchVerificationStats = async () => {
     try {
       console.log('📊 Fetching verification statistics...');
-      
+
       // Get all deployments with their verification status
       const { data: allDeployments, error: allError } = await supabase
         .from(DEPLOYMENTS_TABLE)
-        .select('verification_status, transaction_hash')
+        .select('verification_status,transaction_hash,detected_at')
         .order('detected_at', { ascending: false });
 
       if (allError) {
@@ -312,9 +381,10 @@ export const useContractVerification = () => {
       console.log('📊 Updated verification statistics:', stats);
       setVerificationStats(stats);
 
-      // Auto-queue pending deployments for verification (only new ones)
+      // Auto-queue any new pending deployments
       const pendingDeployments = allDeployments?.filter(d => 
         (!d.verification_status || d.verification_status === 'pending') &&
+        !processedDeployments.current.has(d.transaction_hash) &&
         !verificationInProgress.current.has(d.transaction_hash) &&
         !autoVerificationQueue.some(item => item.transaction_hash === d.transaction_hash)
       ) || [];
@@ -344,7 +414,6 @@ export const useContractVerification = () => {
   const deleteVerifiedContract = async (contractAddress) => {
     try {
       console.log('🗑️ Deleting verified contract:', contractAddress);
-      
       const { error } = await supabase
         .from(CONTRACTS_TABLE)
         .delete()
@@ -369,13 +438,10 @@ export const useContractVerification = () => {
   // Batch verify multiple contracts
   const batchVerifyContracts = async (deploymentRecords, onProgress) => {
     const results = [];
-    
     for (let i = 0; i < deploymentRecords.length; i++) {
       const deployment = deploymentRecords[i];
-      
       try {
         onProgress?.(i + 1, deploymentRecords.length, deployment);
-        
         const result = await verifyContractAddress(deployment);
         results.push({ deployment, result, success: true });
         
@@ -389,8 +455,36 @@ export const useContractVerification = () => {
 
     // Refresh stats after batch verification
     await fetchVerificationStats();
-    
     return results;
+  };
+
+  // Start auto-verification processing
+  const startAutoVerificationProcessing = () => {
+    if (verificationIntervalRef.current) {
+      clearInterval(verificationIntervalRef.current);
+    }
+
+    console.log('🚀 Starting auto-verification processing...');
+    
+    // Process queue immediately
+    processAutoVerificationQueue();
+    
+    // Set up interval to process queue every 10 seconds
+    verificationIntervalRef.current = setInterval(() => {
+      if (autoVerificationQueue.length > 0) {
+        console.log('⏰ Auto-verification interval: processing queue...');
+        processAutoVerificationQueue();
+      }
+    }, 10000); // 10 seconds
+  };
+
+  // Stop auto-verification processing
+  const stopAutoVerificationProcessing = () => {
+    if (verificationIntervalRef.current) {
+      clearInterval(verificationIntervalRef.current);
+      verificationIntervalRef.current = null;
+      console.log('🛑 Stopped auto-verification processing');
+    }
   };
 
   // Set up real-time subscription for deployment changes
@@ -398,14 +492,10 @@ export const useContractVerification = () => {
     console.log('📡 Setting up real-time subscription for deployment changes...');
     
     const channel = supabase
-      .channel('contract_deployments_verification_v2')
+      .channel('contract_deployments_verification_v3')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: DEPLOYMENTS_TABLE
-        },
+        { event: '*', schema: 'public', table: DEPLOYMENTS_TABLE },
         (payload) => {
           console.log('🔄 Deployment change detected:', payload.eventType, payload.new?.transaction_hash?.slice(0, 10) + '...');
           
@@ -413,7 +503,7 @@ export const useContractVerification = () => {
           setTimeout(() => {
             fetchVerificationStats();
           }, 100);
-          
+
           // If it's a new deployment, add it to verification queue immediately
           if (payload.eventType === 'INSERT' && payload.new) {
             console.log('➕ New deployment detected, adding to verification queue immediately');
@@ -440,17 +530,12 @@ export const useContractVerification = () => {
     console.log('📡 Setting up real-time subscription for verified contracts...');
     
     const channel = supabase
-      .channel('verified_contracts_v2')
+      .channel('verified_contracts_v3')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: CONTRACTS_TABLE
-        },
+        { event: '*', schema: 'public', table: CONTRACTS_TABLE },
         (payload) => {
           console.log('🔄 Verified contract change detected:', payload.eventType);
-          
           // Refresh verified contracts list
           fetchVerifiedContracts();
         }
@@ -463,7 +548,7 @@ export const useContractVerification = () => {
     };
   }, []);
 
-  // Process auto-verification queue
+  // Process auto-verification queue when items are added
   useEffect(() => {
     if (autoVerificationQueue.length > 0 && !isAutoVerifying) {
       console.log('🔄 Auto-verification queue has items, processing...');
@@ -475,15 +560,24 @@ export const useContractVerification = () => {
     }
   }, [autoVerificationQueue, isAutoVerifying]);
 
-  // Load data on mount
+  // Enhanced initialization with auto-processing
   useEffect(() => {
     const initialize = async () => {
       setLoading(true);
       try {
+        console.log('🚀 Initializing contract verification system...');
+        
         await Promise.all([
           fetchVerifiedContracts(),
           fetchVerificationStats()
         ]);
+
+        // Queue all pending deployments
+        await queueAllPendingDeployments();
+        
+        // Start auto-verification processing
+        startAutoVerificationProcessing();
+
       } catch (err) {
         console.error('❌ Error initializing contract verification:', err);
         setError(err.message);
@@ -493,6 +587,21 @@ export const useContractVerification = () => {
     };
 
     initialize();
+
+    // Cleanup on unmount
+    return () => {
+      stopAutoVerificationProcessing();
+    };
+  }, []);
+
+  // Periodic check for new deployments
+  useEffect(() => {
+    const periodicCheck = setInterval(() => {
+      console.log('⏰ Periodic check for new pending deployments...');
+      queueAllPendingDeployments();
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(periodicCheck);
   }, []);
 
   return {
@@ -508,6 +617,7 @@ export const useContractVerification = () => {
     deleteVerifiedContract,
     batchVerifyContracts,
     generateContractEtherscanUrl,
-    queueDeploymentForVerification
+    queueDeploymentForVerification,
+    queueAllPendingDeployments
   };
 };

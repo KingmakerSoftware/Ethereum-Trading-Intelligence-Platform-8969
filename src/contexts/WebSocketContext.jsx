@@ -85,7 +85,6 @@ export const WebSocketProvider = ({ children }) => {
       const { default: supabase } = await import('../lib/supabase');
       
       const etherscanUrl = `https://etherscan.io/tx/${deploymentData.transaction_hash}`;
-      
       const dataToSave = {
         transaction_hash: deploymentData.transaction_hash,
         from_address: deploymentData.from_address,
@@ -126,34 +125,11 @@ export const WebSocketProvider = ({ children }) => {
       }
 
       console.log('✅ Contract deployment saved successfully:', data);
+
+      // 🔥 ENHANCED: Real-time verification trigger via Supabase realtime
+      // The verification system will automatically pick up this new deployment
+      // through the real-time subscription in useContractVerification
       
-      // 🔥 TRIGGER IMMEDIATE VERIFICATION
-      // Add a small delay to ensure the record is committed, then trigger verification
-      setTimeout(async () => {
-        try {
-          console.log('🚀 Triggering immediate verification for:', dataToSave.transaction_hash?.slice(0, 10) + '...');
-          
-          // Trigger verification by publishing a verification event via Supabase realtime
-          const verificationTrigger = {
-            action: 'trigger_verification',
-            transaction_hash: dataToSave.transaction_hash,
-            timestamp: new Date().toISOString()
-          };
-
-          // Use a separate channel to trigger verification
-          const verificationChannel = supabase.channel('verification_trigger');
-          verificationChannel.send({
-            type: 'broadcast',
-            event: 'new_deployment_for_verification',
-            payload: verificationTrigger
-          });
-
-          console.log('📡 Verification trigger sent:', verificationTrigger);
-        } catch (verificationError) {
-          console.error('❌ Error triggering verification:', verificationError);
-        }
-      }, 500); // 500ms delay to ensure database commit
-
       return data;
     } catch (err) {
       console.error('❌ Error in saveContractDeploymentWithVerification:', err);
@@ -213,7 +189,7 @@ export const WebSocketProvider = ({ children }) => {
     // Add to array (newest first) and keep last 200 items
     setToParameterFeed(prev => {
       const newFeed = [toEntry, ...prev.slice(0, 199)];
-
+      
       // Debug contract filtering
       const contractCount = newFeed.filter(item => item.isContractDeployment === true).length;
       console.log('Updated toParameterFeed:', {
@@ -227,7 +203,7 @@ export const WebSocketProvider = ({ children }) => {
           hasInput: toEntry.hasInput
         }
       });
-
+      
       return newFeed;
     });
 
@@ -256,6 +232,7 @@ export const WebSocketProvider = ({ children }) => {
 
         await saveContractDeploymentWithVerification(deploymentData);
         addDebugMessage(`💾 Contract deployment saved with auto-verification: ${txHash?.slice(0, 10)}...`);
+
       } catch (error) {
         console.error('❌ Error saving contract deployment with verification:', error);
         addDebugMessage(`❌ Failed to save contract deployment: ${error.message}`);
@@ -289,7 +266,6 @@ export const WebSocketProvider = ({ children }) => {
       if (currentState === WebSocket.OPEN || currentState === WebSocket.CONNECTING) {
         wsRef.current.close(1000, 'Manual disconnect');
       }
-
       wsRef.current = null;
     }
 
@@ -337,7 +313,6 @@ export const WebSocketProvider = ({ children }) => {
       oldWs.onopen = null;
       oldWs.onerror = null;
       oldWs.onclose = null;
-
       if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
         oldWs.close();
       }
@@ -392,7 +367,6 @@ export const WebSocketProvider = ({ children }) => {
         }
 
         messageCount.current++;
-
         try {
           const data = JSON.parse(event.data);
 
@@ -488,6 +462,7 @@ export const WebSocketProvider = ({ children }) => {
           addRawResponse(pairCreatedSub, 'alchemy-request');
         }
       }, RATE_LIMITS.SUBSCRIPTION_DELAY);
+
     } catch (error) {
       addDebugMessage(`❌ Error sending Alchemy subscriptions: ${error.message}`);
     }
@@ -502,7 +477,6 @@ export const WebSocketProvider = ({ children }) => {
     // Handle subscription data
     if (data.method === 'eth_subscription') {
       addDebugMessage(`🎯 Alchemy subscription data received: ${JSON.stringify(data).substring(0, 200)}...`);
-
       const { subscription, result } = data.params;
 
       // Get the subscription ID to know which subscription this is from
@@ -526,7 +500,6 @@ export const WebSocketProvider = ({ children }) => {
         // Log key details for debugging
         const toAddress = txData.to;
         const hasInput = txData.input && txData.input !== '0x' && txData.input.length > 2;
-
         addDebugMessage(`🔍 Alchemy TX: ${txHash.slice(0, 10)}... | to: ${toAddress || 'NULL'} | input: ${hasInput ? 'YES' : 'NO'} | inputLen: ${txData.input?.length || 0}`);
 
         // Check if this is a contract deployment (to field is null/undefined AND has input)
@@ -672,12 +645,16 @@ export const WebSocketProvider = ({ children }) => {
     if (newEnabledState) {
       // Turning ON
       addDebugMessage('🟢 Alchemy WebSocket enabled - preparing connection...');
+      
       // Reset disconnecting flag immediately when turning on
       isDisconnecting.current = false;
+      
       // Update the ref immediately for synchronous access
       enabledStateRef.current = true;
+      
       // Set the React state
       setIsEnabled(true);
+      
       // Start connection immediately using the ref value
       setTimeout(() => {
         connect();
@@ -685,10 +662,13 @@ export const WebSocketProvider = ({ children }) => {
     } else {
       // Turning OFF
       addDebugMessage('🔴 Alchemy WebSocket disabled - disconnecting...');
+      
       // Update ref immediately
       enabledStateRef.current = false;
+      
       // Set the React state
       setIsEnabled(false);
+      
       disconnect();
     }
   };
@@ -696,7 +676,7 @@ export const WebSocketProvider = ({ children }) => {
   // Generate mock data for demo
   const generateMockData = () => {
     addDebugMessage('🎭 Generating mock data for Alchemy demo');
-
+    
     const mockContracts = [
       {
         id: Date.now() + Math.random(),
